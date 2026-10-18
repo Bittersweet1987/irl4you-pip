@@ -55,3 +55,6 @@ SRT-Pakete werden unverändert durchgereicht. Dazu kommen eigene SRTLA-Pakete. E
   Fenster Platz hat.
 - **Quell-Routing:** Jede Leitung ist an die IP-Adresse ihrer Netzwerkkarte gebunden (die Routing-Regeln je Quelladresse setzt das
   System), auf Wunsch zusätzlich an die Karte selbst (`SO_BINDTODEVICE`).
+- **Läufe:** Aufeinanderfolgende Datenpakete bleiben `--burst` Pakete lang auf derselben Leitung. Leitungen haben verschiedene
+  Laufzeiten; jedes einzeln verteilte Paket kommt beim Empfänger als Lücke an, die der SRT-Empfänger meldet (NAK) und die der
+  Sender dann unnötig noch einmal schickt. Läufe verringern diese Umordnungs-NAKs (Test `test_bursts_reduce_reordering`).

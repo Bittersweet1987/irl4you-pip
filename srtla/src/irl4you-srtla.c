@@ -109,6 +109,7 @@ static struct {
     bool lat_pref;
     int margin_ms;
     int min_share;
+    int burst;                /* packets in a row on one link before switching */
     bool bind_dev;
     bool quiet;
 
@@ -124,6 +125,7 @@ static struct {
     link_t links[MAX_LINKS];
     uint8_t key[KEY_LEN];
     int group;
+    int run_link, run_left;
     int64_t t_group_tx, t_group_nak;
     int ask_next;
 
@@ -523,7 +525,7 @@ static void classify_links(void)
     }
 }
 
-static int pick_link(void)
+static int pick_link_fresh(void)
 {
     double sum = 0;
     for (int i = 0; i < MAX_LINKS; i++)
@@ -577,6 +579,24 @@ static int pick_link(void)
             return pick;
     }
     return -1;
+}
+
+/* Consecutive packets stay on one link for a short run: links differ in delay, and spreading every single packet
+ * makes the receiver see gaps (and NAK them) that are only reordering. Runs keep the order inside the run and
+ * shrink the number of switch points. */
+static int pick_link(void)
+{
+    if (S.run_left > 0 && S.run_link >= 0) {
+        const link_t *l = &S.links[S.run_link];
+        if (l->slot_state == L_UP && l->used && l->inflight < l->win) {
+            S.run_left--;
+            return S.run_link;
+        }
+    }
+    int li = pick_link_fresh();
+    S.run_link = li;
+    S.run_left = li >= 0 ? S.burst - 1 : 0;
+    return li;
 }
 
 static int fastest_link(void)
@@ -927,6 +947,7 @@ static void usage(FILE *f)
             "      --margin MS           Toleranz zur schnellsten Leitung (Standard best 50, all 300)\n"
             "      --no-latency          Laufzeit bei der Auswahl nicht beachten\n"
             "      --min-share PROZENT   Mindestanteil je genutzter Leitung, 0-40 (Standard best 0, all 10)\n"
+            "      --burst N             N Pakete in Folge auf einer Leitung, 1-64 (Standard 8)\n"
             "      --bind-device         zusätzlich an die Netzwerkkarte binden (braucht CAP_NET_RAW)\n"
             "      --status DATEI        Zustand jede Sekunde als JSON in diese Datei schreiben\n"
             "  -q, --quiet               nichts auf stdout ausgeben\n"
@@ -941,7 +962,7 @@ static void parse_args(int argc, char **argv)
         {"listen", required_argument, 0, 'l'},  {"mode", required_argument, 0, 'm'},
         {"margin", required_argument, 0, 1},    {"no-latency", no_argument, 0, 2},
         {"min-share", required_argument, 0, 3}, {"bind-device", no_argument, 0, 4},
-        {"status", required_argument, 0, 5},    {"quiet", no_argument, 0, 'q'},
+        {"status", required_argument, 0, 5},  {"burst", required_argument, 0, 6},    {"quiet", no_argument, 0, 'q'},
         {"version", no_argument, 0, 'V'},       {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}};
     int margin = -1, share = -1, c;
@@ -949,6 +970,7 @@ static void parse_args(int argc, char **argv)
     snprintf(S.listen_host, sizeof S.listen_host, "127.0.0.1");
     S.listen_port = 5000;
     S.lat_pref = true;
+    S.burst = 8;
     while ((c = getopt_long(argc, argv, "s:i:l:m:qVh", opts, NULL)) != -1) {
         switch (c) {
         case 's':
@@ -985,6 +1007,11 @@ static void parse_args(int argc, char **argv)
             break;
         case 4:
             S.bind_dev = true;
+            break;
+        case 6:
+            S.burst = (int)strtol(optarg, &end, 10);
+            if (*end || S.burst < 1 || S.burst > 64)
+                goto bad;
             break;
         case 5:
             snprintf(S.status_file, sizeof S.status_file, "%s", optarg);

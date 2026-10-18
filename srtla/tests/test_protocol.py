@@ -322,6 +322,28 @@ class TestLinkChoice(Base):
         time.sleep(2)
         self.assertEqual(r.link("127.0.0.3")["state"], "used")
 
+    def test_bursts_reduce_reordering(self):
+        def gaps(*args):
+            r = self.rig(["127.0.0.2", "127.0.0.3"], "-m", "all", "--margin", "100", *args)
+            r.rx.set_rule("127.0.0.3", delay_ms=15)
+            r.wait_up(["127.0.0.2", "127.0.0.3"])
+            r.wait_rtt(["127.0.0.2", "127.0.0.3"])
+            time.sleep(2)
+            r.stream(1, 3000, pace=0.001)
+            seqs = r.drain_server(0.6)
+            self.assertGreater(len(seqs), 2900)
+            self.assertGreater(r.rx.data_by_ip.get("127.0.0.3", 0), 300, "both links must carry traffic")
+            # what an SRT receiver would NAK: every packet that jumps past the highest number seen so far
+            top, jumps = 0, 0
+            for q in seqs:
+                if top and q > top + 1:
+                    jumps += 1
+                top = max(top, q)
+            return jumps
+
+        single, burst = gaps("--burst", "1"), gaps("--burst", "12")
+        self.assertLess(burst, single * 0.5, f"single={single} burst={burst}")
+
     def test_min_share(self):
         def share_of_second(*args):
             r = self.rig(["127.0.0.2", "127.0.0.3"], "-m", "best", "--margin", "100", *args)

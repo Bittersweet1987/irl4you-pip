@@ -31,6 +31,7 @@ irl4you-srtla -s srtla.example.net:5000 -i /run/pipbox-send/links -l 127.0.0.1:5
 | `--margin MS` | Toleranz zur schnellsten Leitung; langsamere Leitungen sind Reserve (Standard: best 50, all 300) |
 | `--no-latency` | Laufzeit bei der Auswahl nicht beachten |
 | `--min-share P` | jede genutzte Leitung bekommt mindestens P % der Pakete, 0–40 (Standard: best 0, all 10) |
+| `--burst N` | N Pakete in Folge auf einer Leitung, 1–64 (Standard 8). Weniger Umordnung beim Empfänger, also weniger NAK und Nachsendungen |
 | `--bind-device` | Leitung zusätzlich an die Netzwerkkarte aus der Liste binden (braucht root bzw. `CAP_NET_RAW`) |
 | `--status DATEI` | Zustand jede Sekunde als JSON in diese Datei (atomar ersetzt) |
 | `-q` | nichts auf stdout ausgeben |
