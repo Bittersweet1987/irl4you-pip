@@ -61,3 +61,4 @@ SRT-Pakete werden unverändert durchgereicht. Dazu kommen eigene SRTLA-Pakete. E
 - **Umordnung statt Verlust:** Meldet der Empfänger per NAK ein Paket, das jünger ist als eine halbe Laufzeit plus zwei Schwankungen
   seiner Leitung (mindestens 10 ms, höchstens 120 ms), zählt es als Umordnung (`reordered`): kein Verlust, kein kleineres Fenster.
   Ein Fensterschnitt bei echtem Verlust ist 10 %. Gruppenanfrage und Anmeldung werden alle 400 ms wiederholt.
+- **Verlustgewicht:** Jede Leitung hat einen geglätteten Verlustanteil (`loss_pct`). Im Modus `all` zählt ihr freier Fensteranteil mit 1 − 3·Verlust (mindestens 0,25): verlustreiche Leitungen bekommen weniger Last.

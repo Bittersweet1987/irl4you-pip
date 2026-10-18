@@ -91,6 +91,8 @@ typedef struct {
     double recent;            /* decaying packet count for the share */
     uint64_t tx_pkts, tx_bytes, lost, reordered, last_bytes;
     double kbps;
+    double loss;              /* smoothed share of packets reported lost (0..1) */
+    uint64_t last_lost, last_pkts;
     int last_errno;
 } link_t;
 
@@ -231,9 +233,9 @@ static void write_stats(FILE *f)
             fprintf(f, ",\"rtt_ms\":%.1f,\"jitter_ms\":%.1f", l->srtt, l->jitter);
         else
             fprintf(f, ",\"rtt_ms\":null,\"jitter_ms\":null");
-        fprintf(f, ",\"window\":%d,\"inflight\":%d,\"kbps\":%.0f,\"share\":%.0f,\"packets\":%llu,\"lost\":%llu,\"reordered\":%llu",
+        fprintf(f, ",\"window\":%d,\"inflight\":%d,\"kbps\":%.0f,\"share\":%.0f,\"packets\":%llu,\"lost\":%llu,\"reordered\":%llu,\"loss_pct\":%.1f",
                 (int)l->win, l->inflight, l->kbps, sum > 0 ? 100.0 * l->recent / sum : 0.0,
-                (unsigned long long)l->tx_pkts, (unsigned long long)l->lost, (unsigned long long)l->reordered);
+                (unsigned long long)l->tx_pkts, (unsigned long long)l->lost, (unsigned long long)l->reordered, l->loss * 100);
         if (l->last_errno)
             fprintf(f, ",\"error\":\"%s\"", strerror(l->last_errno));
         fprintf(f, "}");
@@ -529,6 +531,13 @@ static void classify_links(void)
     }
 }
 
+/* 1.0 for a clean link, down to 0.25 for one that loses a quarter of its packets or more */
+static double link_quality(const link_t *l)
+{
+    double q = 1.0 - 3.0 * l->loss;
+    return q < 0.25 ? 0.25 : q;
+}
+
 static int pick_link_fresh(void)
 {
     double sum = 0;
@@ -567,6 +576,8 @@ static int pick_link_fresh(void)
             double room = (l->win - l->inflight) / l->win;
             if (pass < 2 && room <= 0)
                 continue;
+            if (pass < 2)
+                room *= link_quality(l); /* a link that really loses packets gets less */
             double v;
             if (pass == 2)
                 v = room;
@@ -917,6 +928,11 @@ static void every_second(double secs)
         link_t *l = &S.links[i];
         l->kbps = (l->tx_bytes - l->last_bytes) * 8 / 1000.0 / secs;
         l->last_bytes = l->tx_bytes;
+        uint64_t dp = l->tx_pkts - l->last_pkts, dl = l->lost - l->last_lost;
+        l->last_pkts = l->tx_pkts;
+        l->last_lost = l->lost;
+        if (dp >= 20)
+            l->loss += 0.3 * ((double)dl / (double)dp - l->loss);
     }
     emit_stats();
 }
