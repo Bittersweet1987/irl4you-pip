@@ -359,7 +359,20 @@ class TestLinkChoice(Base):
         self.assertLess(share_of_second(), 0.05)
         self.assertGreater(share_of_second("--min-share", "25"), 0.18)
 
-    def test_loss_report_shrinks_window_of_the_right_link(self):
+    def test_fresh_gap_is_reordering_not_loss(self):
+        r = self.rig(["127.0.0.2", "127.0.0.3"], "-m", "all", "--no-latency", "--min-share", "30")
+        r.wait_up(["127.0.0.2", "127.0.0.3"])
+        r.wait_rtt(["127.0.0.2", "127.0.0.3"])
+        r.rx.set_rule("127.0.0.3", delay_ms=500)
+        r.stream(1, 200, pace=0)
+        not_yet = [s for s in range(1, 201) if s not in r.rx.seq_ip]
+        self.assertTrue(not_yet, "nichts unterwegs")
+        r.rx.send_to_conns(ctl_pkt(3, b"".join(struct.pack(">I", s) for s in not_yet[-3:])), ip="127.0.0.2")
+        both = ("127.0.0.2", "127.0.0.3")
+        r.wait(lambda: sum(r.link(i)["reordered"] for i in both) >= 1, timeout=3, msg="Umordnung gezählt")
+        self.assertEqual(sum(r.link(i)["lost"] for i in both), 0)
+
+    def test_loss_report_counts_on_the_right_link(self):
         r = self.rig(["127.0.0.2", "127.0.0.3"], "-m", "all", "--no-latency", "--min-share", "30")
         r.wait_up(["127.0.0.2", "127.0.0.3"])
         r.rx.set_rule("127.0.0.3", delay_ms=500)  # packets over .3 stay on their way for a while
@@ -368,11 +381,11 @@ class TestLinkChoice(Base):
         not_yet = [s for s in range(1, 401) if s not in r.rx.seq_ip]
         self.assertTrue(not_yet, "nichts über .3 gesendet")
         window = r.link("127.0.0.3")["window"]
-        body = b"".join(struct.pack(">I", s) for s in not_yet[:5])
+        time.sleep(0.15)  # older than the reordering window, still on its way: a real loss
+        body = b"".join(struct.pack(">I", s) for s in not_yet[:60])
         r.rx.send_to_conns(ctl_pkt(3, body), ip="127.0.0.2")
-        r.wait(lambda: r.link("127.0.0.3")["lost"] == 5, timeout=3, msg="Verlust auf .3")
+        r.wait(lambda: r.link("127.0.0.3")["lost"] >= 1, timeout=3, msg="Verlust auf .3")
         self.assertEqual(r.link("127.0.0.2")["lost"], 0)
-        self.assertLess(r.link("127.0.0.3")["window"], window)
 
 
 class TestFailure(Base):

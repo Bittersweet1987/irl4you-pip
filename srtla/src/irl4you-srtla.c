@@ -56,13 +56,17 @@
 #define US             1000000LL
 #define MS             1000LL
 #define TICK_MS        20
-#define RETRY_US       (1 * US)       /* group request / join repeat */
+#define RETRY_US       (400 * MS)     /* group request / join repeat */
+#define NAK_RETRY_US   (1 * US)       /* wait after the receiver refused a new group */
 #define REOPEN_US      (2 * US)       /* socket re-open after a hard error */
 #define LINK_SILENT_US (4 * US)       /* no answer that long: link counts as gone */
 #define PROBE_EVERY_US (200 * MS)
 #define PROBE_LOST_US  (1500 * MS)
 #define RESOLVE_US     (10 * US)
 #define EXPIRE_MIN_US  (1500 * MS)
+
+#define REORDER_MIN_MS 10.0  /* scheduling and queueing noise even on a fast link */
+#define REORDER_MAX_MS 120.0 /* a gap this old is loss even on a slow, jittery link */
 
 #define WIN_INIT 32.0
 #define WIN_MIN  12.0 /* receivers report every 10 packets, stay above that */
@@ -85,7 +89,7 @@ typedef struct {
     int64_t t_cut;
     int inflight;
     double recent;            /* decaying packet count for the share */
-    uint64_t tx_pkts, tx_bytes, lost, last_bytes;
+    uint64_t tx_pkts, tx_bytes, lost, reordered, last_bytes;
     double kbps;
     int last_errno;
 } link_t;
@@ -227,9 +231,9 @@ static void write_stats(FILE *f)
             fprintf(f, ",\"rtt_ms\":%.1f,\"jitter_ms\":%.1f", l->srtt, l->jitter);
         else
             fprintf(f, ",\"rtt_ms\":null,\"jitter_ms\":null");
-        fprintf(f, ",\"window\":%d,\"inflight\":%d,\"kbps\":%.0f,\"share\":%.0f,\"packets\":%llu,\"lost\":%llu",
+        fprintf(f, ",\"window\":%d,\"inflight\":%d,\"kbps\":%.0f,\"share\":%.0f,\"packets\":%llu,\"lost\":%llu,\"reordered\":%llu",
                 (int)l->win, l->inflight, l->kbps, sum > 0 ? 100.0 * l->recent / sum : 0.0,
-                (unsigned long long)l->tx_pkts, (unsigned long long)l->lost);
+                (unsigned long long)l->tx_pkts, (unsigned long long)l->lost, (unsigned long long)l->reordered);
         if (l->last_errno)
             fprintf(f, ",\"error\":\"%s\"", strerror(l->last_errno));
         fprintf(f, "}");
@@ -496,7 +500,7 @@ static void window_cut(link_t *l, int64_t now)
     if (now - l->t_cut < gap)
         return;
     l->t_cut = now;
-    l->win *= 0.7;
+    l->win *= 0.9;
     if (l->win < WIN_MIN)
         l->win = WIN_MIN;
     l->win_cap = l->win;
@@ -681,8 +685,17 @@ static void handle_loss_report(const uint8_t *buf, size_t n, int64_t now)
             track_t *e = track_find((a + k) & 0x7fffffff);
             if (!e)
                 continue;
+            link_t *ol = &S.links[e->link];
+            /* A packet that is younger than a one-way trip plus jitter on its own link can still be on its way:
+             * the receiver saw a gap that is only reordering between links. No loss, no smaller window. */
+            double young = ol->have_rtt ? ol->srtt / 2 + 2 * ol->jitter : 20;
+            young = (young > REORDER_MAX_MS ? REORDER_MAX_MS : young < REORDER_MIN_MS ? REORDER_MIN_MS : young) * MS;
+            if (now - e->t < (int64_t)young) {
+                ol->reordered++;
+                continue;
+            }
             hit[e->link] = true;
-            S.links[e->link].lost++;
+            ol->lost++;
             track_retire(e);
         }
     }
@@ -758,7 +771,7 @@ static void from_link(link_t *l, const uint8_t *buf, size_t n, int64_t now)
                 group_reset("Empfänger kennt die Gruppe nicht");
             break;
         case T_GROUP_NAK:
-            if (S.group == G_ASKED && now - S.t_group_nak > RETRY_US) {
+            if (S.group == G_ASKED && now - S.t_group_nak > NAK_RETRY_US) {
                 S.t_group_nak = now;
                 event("warn", l, "Empfänger lehnt neue Gruppe ab");
                 S.group = G_NONE;

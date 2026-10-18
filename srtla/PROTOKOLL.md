@@ -58,3 +58,6 @@ SRT-Pakete werden unverändert durchgereicht. Dazu kommen eigene SRTLA-Pakete. E
 - **Läufe:** Aufeinanderfolgende Datenpakete bleiben `--burst` Pakete lang auf derselben Leitung. Leitungen haben verschiedene
   Laufzeiten; jedes einzeln verteilte Paket kommt beim Empfänger als Lücke an, die der SRT-Empfänger meldet (NAK) und die der
   Sender dann unnötig noch einmal schickt. Läufe verringern diese Umordnungs-NAKs (Test `test_bursts_reduce_reordering`).
+- **Umordnung statt Verlust:** Meldet der Empfänger per NAK ein Paket, das jünger ist als eine halbe Laufzeit plus zwei Schwankungen
+  seiner Leitung (mindestens 10 ms, höchstens 120 ms), zählt es als Umordnung (`reordered`): kein Verlust, kein kleineres Fenster.
+  Ein Fensterschnitt bei echtem Verlust ist 10 %. Gruppenanfrage und Anmeldung werden alle 400 ms wiederholt.
